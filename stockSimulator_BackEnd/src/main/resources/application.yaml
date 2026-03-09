@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: stockSimulator
+
+  # datasource는 application과 같은 라인에 있어야 합니다.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/stock_db
+    username: jouijae  # 만약 연결 에러가 나면 본인의 Mac 계정명으로 바꿔보세요.
+    password: ""
+    driver-class-name: org.postgresql.Driver
+
+  # JPA 설정
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # Redis 설정
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+# 서버 포트 설정 (spring 소속이 아니므로 맨 앞으로 붙입니다)
+server:
+  port: 8080
