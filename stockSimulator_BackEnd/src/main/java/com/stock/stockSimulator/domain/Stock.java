@@ -11,31 +11,31 @@ import lombok.Setter;
 
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
-@AllArgsConstructor
 public class Stock {
+
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private String stockCode;
+    private String companyName;
 
-    private String code;
-    private String name;
-    private Long currentPrice;
     private Long openingPrice;
-    private Long endingPrice;
+    private Long closingPrice;
+    private Long highPrice;
+    private Long lowPrice;
+    private Long currentPrice;
 
-    public Stock(String code, String name, Long currentPrice, Long openingPrice, Long endingPrice){
-        this.code = code;
-        this.name = name;
-        this.currentPrice = currentPrice;
-        this.openingPrice = openingPrice;
-        this.endingPrice = endingPrice;
+
+    public Stock(String stockCode, String companyName){
+        this.stockCode = stockCode;
+        this.companyName = companyName;
     }
 
-
-    public double getChangeRate() {
-        if (openingPrice == null || openingPrice == 0) return 0.0;
-        return ((double) (currentPrice - openingPrice) / openingPrice) * 100;
+    //Redis 데이터 디비 엔터티로 반영 메서드
+    public void updateClosingInfo(Long openingPrice, Long highPrice, Long lowPrice, Long closingPrice){
+        this.openingPrice = openingPrice;
+        this.closingPrice = closingPrice;
+        this.currentPrice = closingPrice;
+        this.highPrice = highPrice;
+        this.lowPrice = lowPrice;
     }
 }

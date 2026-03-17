@@ -25,16 +25,31 @@ repositories {
 }
 
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+	// 1. Web & WebSocket (API 및 실시간 통신)
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
+	// 2. Database (postgresql & JPA)
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	runtimeOnly 'org.postgresql:postgresql'
+
+	// 3. Redis (Spring Data Redis - 기본 연동 및 Pub/Sub용)
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
+	// 4. Redisson (분산락 전용 라이브러리)
+	// 스프링 부트 3.x 버전을 사용하신다면 3.24.3 이상의 버전을 권장합니다.
+	implementation 'org.redisson:redisson-spring-boot-starter:3.24.3'
+
+	// 5. Security & OAuth2 (소셜 로그인)
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
 
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
-	runtimeOnly 'org.postgresql:postgresql'
+
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

@@ -1,4 +1,4 @@
-package com.stock.stockSimulator.scheduler;
+package com.stock.stockSimulator.component;
 
 import com.stock.stockSimulator.repository.StockRepository;
 import com.stock.stockSimulator.service.RedisService;
