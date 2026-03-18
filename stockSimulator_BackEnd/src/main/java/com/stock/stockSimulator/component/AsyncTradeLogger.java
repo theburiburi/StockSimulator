@@ -10,59 +10,46 @@ import com.stock.stockSimulator.repository.TradeRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AsyncTradeLogger {
-
-    private final TradeRepository tradeRepository;
+    private final RedissonClient redisson;
     private final MemberRepository memberRepository;
-    private final OrderRepository orderRepository;
     private final MemberStockRepository memberStockRepository;
+    private final TradeRepository tradeRepository;
+    private final OrderRepository orderRepository;
+
 
     @Async("taskExecutor")
     @Transactional
     public void recordTrade(Long buyerId, Long sellerId, Long orderId,
                             String stockCode, int price, int qty) {
+        RLock lock = redisson.getLock("lock:trade:"+buyerId+":"+sellerId);
         try {
-            long totalAmount = (long) price * qty;
-
-            TradeLog tradeLog = new TradeLog(buyerId, sellerId, stockCode, price, qty);
-            tradeRepository.save(tradeLog);
-
-            // ================= [ 매수자 처리 ] =================
-            // 지원자님이 작성한 findByIdWithLock(Long id) 사용!
-            Member buyer = memberRepository.findByIdWithLock(buyerId)
-                    .orElseThrow(() -> new RuntimeException("매수자를 찾을 수 없습니다."));
-            buyer.decreaseBalance(totalAmount);
-
-            MemberStock buyerStock = memberStockRepository.findByMemberIdAndStockCodeWithLock(buyerId, stockCode)
-                    .orElseGet(() -> new MemberStock(buyerId, stockCode, 0));
-            buyerStock.addQuantity(qty);
-            memberStockRepository.save(buyerStock);
-
-            // ================= [ 매도자 처리 ] =================
-            Member seller = memberRepository.findByIdWithLock(sellerId)
-                    .orElseThrow(() -> new RuntimeException("매도자를 찾을 수 없습니다."));
-            seller.increaseBalance(totalAmount);
-
-            MemberStock sellerStock = memberStockRepository.findByMemberIdAndStockCodeWithLock(sellerId, stockCode)
-                    .orElseThrow(() -> new RuntimeException("매도자의 보유 주식이 없습니다."));
-            sellerStock.removeQuantity(qty);
-
-            // ================= [ 주문 상태 업데이트 ] =================
-            StockOrder order = orderRepository.findById(orderId)
-                    .orElseThrow(() -> new RuntimeException("주문 원장을 찾을 수 없습니다."));
-            order.applyTrade(qty);
-
-            log.info("[DB 비동기 기록 완료] 주문번호: {}", orderId);
-
+    if(lock.tryLock(5,2, TimeUnit.SECONDS)){
+        updateDb(buyerId, sellerId, orderId, stockCode, price, qty);
+    }
         } catch (Exception e) {
-            log.error("[DB 비동기 청산 실패] 주문번호: {}, 원인: {}", orderId, e.getMessage());
-            throw e;
+            e.printStackTrace();
+        } finally {
+            if(lock.isHeldByCurrentThread()) lock.unlock();
         }
+    }
+
+    @Transactional
+    public void updateDb(Long buyerId, Long sellerId, Long orderId, String stockCode, int price, int quantity){
+        Member buyer = memberRepository.findById(buyerId).orElseThrow();
+        buyer.decreaseBalance((long) price*quantity);
+        MemberStock memberStock = memberStockRepository.findByMemberIdAndStockCode(sellerId, stockCode).orElseThrow();
+        memberStock.addQuantitiy(-quantity);
+        orderRepository.findById(orderId).ifPresent(o -> o.applyTrade(quantity));
     }
 }
