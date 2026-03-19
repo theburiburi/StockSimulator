@@ -1,81 +1,94 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8"> <title>실시간 주식 시뮬레이터</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
-    <style>
-        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background-color: #f4f4f9; }
-        .stock-card {
-            background: white; border-radius: 8px; padding: 15px; margin-bottom: 10px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; justify-content: space-between;
-            align-items: center;
-        }
-        .price-info { text-align: right; }
-        .price { font-weight: bold; font-size: 1.2em; }
-        .up { color: #e74c3c; }   /* 상승: 빨간색 */
-        .down { color: #3498db; } /* 하락: 파란색 */
-        .equal { color: #333; }   /* 변동없음 */
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockSimulator Live Dashboard</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- WebSockets -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.5.2/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<h1>📈 실시간 주식 전광판</h1>
-<div id="stock-list"></div>
-
-<script>
-    const socket = new SockJS('/ws-stock');
-    const stompClient = Stomp.over(socket);
-
-    // 디버그 로그 끄기 (콘솔 깨끗하게)
-    stompClient.debug = null;
-
-    stompClient.connect({}, function (frame) {
-        console.log('연결 성공!');
-        stompClient.subscribe('/topic/stock', function (response) {
-            const stock = JSON.parse(response.body);
-            updateStockUI(stock);
-        });
-    });
-
-    function updateStockUI(stock) {
-        const list = document.getElementById('stock-list');
-        let stockElement = document.getElementById('stock-' + stock.code);
-
-        if (!stockElement) {
-            stockElement = document.createElement('div');
-            stockElement.id = 'stock-' + stock.code;
-            stockElement.className = 'stock-card';
-            list.appendChild(stockElement);
-        }
-
-        // 숫자형 변환 (중요)
-        const current = Number(stock.currentPrice);
-        const open = Number(stock.openingPrice);
-
-        const diff = current - open;
-        const rate = open !== 0 ? ((diff / open) * 100).toFixed(2) : "0.00";
-
-        let colorClass = 'equal';
-        let sign = '';
-
-        if (diff > 0) {
-            colorClass = 'up';
-            sign = '+';
-        } else if (diff < 0) {
-            colorClass = 'down';
-        }
-
-        // innerHTML로 전체를 갈아 끼워 실시간 반영 보장
-        stockElement.innerHTML = `
-                <div>
-                    <strong>${stock.name}</strong> <span style="color:#888; font-size:0.9em;">(${stock.code})</span>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <div class="header-content">
+                <div class="logo-container">
+                    <div class="pulse-dot"></div>
+                    <h1>StockSimulator <span class="badge">LIVE</span></h1>
                 </div>
-                <div class="price-info">
-                    <div class="price ${colorClass}">${current.toLocaleString()}원</div>
-                    <div class="${colorClass}" style="font-size:0.9em;">(${sign}${rate}%)</div>
+                <p class="subtitle">실시간 주가 감지 시스템</p>
+                <div class="admin-controls" id="adminControls" style="display: none; margin-top: 15px; gap: 10px;">
+                    <button class="btn-admin primary" onclick="adminOpenMarket()">[Admin] 장 시작 (유동성 공급)</button>
+                    <button class="btn-admin secondary" onclick="adminCloseMarket()">[Admin] 장 마감 (주문 취소)</button>
                 </div>
-            `;
-    }
-</script>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px;">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-indicator disconnected"></span>
+                    <span class="status-text">연결 대기중...</span>
+                </div>
+                
+                <!-- Auth Section -->
+                <div id="loginSection">
+                    <button onclick="window.location.href='/oauth2/authorization/kakao'" style="padding: 10px 15px; background: #fee500; color: #000; font-weight: bold; border: none; border-radius: 8px; cursor: pointer;">카카오 로그인</button>
+                </div>
+                <div id="userSection" style="display: none; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
+                    <div>👤 <span id="userName" style="font-weight: bold;"></span> 님</div>
+                    <div style="font-size: 0.9rem; color: #8e9bb0; margin-top: 4px;">💰 잔고: <span id="userBalance"></span>원</div>
+                    <div style="display: flex; gap: 8px; margin-top: 10px;">
+                        <button onclick="document.getElementById('portfolioModal').style.display='flex'; fetchPortfolio();" style="flex: 1; padding: 6px 12px; background: #0077ff; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">내 주식</button>
+                        <button onclick="document.getElementById('orderHistoryModal').style.display='flex'; fetchOrderHistory();" style="flex: 1; padding: 6px 12px; background: #ff3366; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">체결 내역</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <!-- Ticker Section -->
+            <div class="ticker-wrap" id="tickerWrap" style="display: none;">
+                <div class="ticker" id="tickerContent">
+                    <!-- Real-time trades go here -->
+                </div>
+            </div>
+
+            <div class="grid-container" id="stockGrid">
+                <!-- Stock Cards will be appended here dynamically -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Portfolio Modal -->
+    <div class="modal-overlay" id="portfolioModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📊 내 보유 주식 현황</h2>
+                <button class="modal-close" onclick="document.getElementById('portfolioModal').style.display='none'">&times;</button>
+            </div>
+            <div class="portfolio-list" id="portfolioList">
+                <div style="text-align: center; color: #8e9bb0; padding: 20px;">보유 중인 주식이 없습니다.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Order History Modal -->
+    <div class="modal-overlay" id="orderHistoryModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📜 내 주문 내역</h2>
+                <button class="modal-close" onclick="document.getElementById('orderHistoryModal').style.display='none'">&times;</button>
+            </div>
+            <div class="portfolio-list" id="orderHistoryList">
+                <div style="text-align: center; color: #8e9bb0; padding: 20px;">주문 내역이 없습니다.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logic -->
+    <script src="app.js?v=5"></script>
 </body>
 </html>

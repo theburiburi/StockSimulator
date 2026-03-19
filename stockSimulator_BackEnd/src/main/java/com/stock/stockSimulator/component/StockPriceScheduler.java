@@ -17,7 +17,7 @@ public class StockPriceScheduler {
     private final Random random = new Random();
     private final SimpMessageSendingOperations messageTemplate;
 
-    @Scheduled(fixedRate = 1000)
+    // @Scheduled(fixedRate = 1000) // 랜덤 가격 변동 스케줄러 비활성화
     public void updatePrice(){
         stockRepository.findAll().forEach(stock -> {
             Long currentPrice = redisService.getStockPrice(stock.getStockCode());

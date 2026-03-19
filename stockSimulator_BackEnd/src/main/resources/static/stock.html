@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>종목 호가창 - StockSimulator</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- WebSockets -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.5.2/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="stock.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header" style="margin-bottom: 20px; padding-bottom: 10px;">
+            <div class="logo-container" style="cursor: pointer;" onclick="window.location.href='index.html'">
+                <h2 style="color: #8e9bb0; font-size: 1.2rem;">⬅ 메인으로 돌아가기</h2>
+            </div>
+            <div style="text-align: right;">
+                <h1 id="stockName">종목명 로딩중...</h1>
+                <div class="stock-code" id="stockCodeStr" style="display:inline-block; font-size:1rem; margin-top:5px;">000000</div>
+            </div>
+        </header>
+
+        <div class="stock-details-container">
+            <!-- Left: Order Book (호가창) -->
+            <div class="order-book-panel">
+                <h3>📊 실시간 호가창 (Order Book)</h3>
+                <div class="order-book-header">
+                    <div>매도잔량 (SELL)</div>
+                    <div>호가 (PRICE)</div>
+                    <div>매수잔량 (BUY)</div>
+                </div>
+                <div id="orderBookGrid">
+                    <!-- Dynamic Rows -->
+                    <div style="text-align:center; padding:30px; color:#8e9bb0;">호가 데이터를 불러오는 중...</div>
+                </div>
+            </div>
+
+            <!-- Right: Trade Panel -->
+            <div class="trade-panel">
+                <div id="priceColorWrap" class="neutral">
+                    <div class="current-price-huge" id="currentPrice">0</div>
+                    <div class="change-rate-huge" id="changeRate">0.00%</div>
+                </div>
+                
+                <div class="trade-form" id="tradeForm" style="margin-top: 40px;">
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                        <button id="btnLimit" onclick="setOrderType('LIMIT')" style="flex: 1; padding: 10px; background: #ff3366; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; opacity: 1; transition: opacity 0.2s;">지정가 (주문 대기)</button>
+                        <button id="btnMarket" onclick="setOrderType('MARKET')" style="flex: 1; padding: 10px; background: #0077ff; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; opacity: 0.3; transition: opacity 0.2s;">시장가 (즉시 체결)</button>
+                    </div>
+
+                    <label>주문 수량 (주)</label>
+                    <input type="number" id="tradeQty" placeholder="매매할 수량을 입력하세요" class="trade-input-large" min="1" />
+                    
+                    <div id="priceInputGroup">
+                        <label>주문 가격 (100원 단위 필수)</label>
+                        <input type="number" id="tradePrice" step="100" class="trade-input-large" />
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button class="btn-buy-huge" onclick="submitTrade('BUY')">매수 (BUY)</button>
+                        <button class="btn-sell-huge" onclick="submitTrade('SELL')">매도 (SELL)</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logic -->
+    <script src="stock.js"></script>
+</body>
+</html>

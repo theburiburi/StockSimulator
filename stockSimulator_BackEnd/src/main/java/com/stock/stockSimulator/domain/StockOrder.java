@@ -24,6 +24,9 @@ public class StockOrder {
     @Enumerated(EnumType.STRING)
     private OrderSide side;
 
+    @Enumerated(EnumType.STRING)
+    private OrderType orderType = OrderType.LIMIT;
+
     private Long price;
     private Integer quantity;
     private Integer remainingQuantity;
