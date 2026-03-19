@@ -11,9 +11,9 @@ import java.util.Optional;
 public interface MemberRepository extends JpaRepository<Member, Long> {
     Optional<Member> findByEmail(String email);
 
-//    @Lock(LockModeType.PESSIMISTIC_WRITE)
-//    @Query("select m from Member m where m.id = :id")
-//    Optional<Member> findByIdWithLock(Long id);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from Member m where m.id = :id")
+    Optional<Member> findByIdWithLock(@org.springframework.data.repository.query.Param("id") Long id);
 }
 
 

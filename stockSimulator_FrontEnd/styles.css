@@ -1,0 +1,234 @@
+:root {
+    --bg-dark: #07090f;
+    --card-bg: rgba(255, 255, 255, 0.03);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --text-primary: #ffffff;
+    --text-secondary: #8e9bb0;
+    --color-up: #ff3366;
+    --color-up-bg: rgba(255, 51, 102, 0.15);
+    --color-down: #0077ff;
+    --color-down-bg: rgba(0, 119, 255, 0.15);
+    --color-neutral: #8e9bb0;
+    --font-stack: 'Outfit', sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    font-family: var(--font-stack);
+    -webkit-font-smoothing: antialiased;
+    background-image: radial-gradient(circle at 15% 50%, rgba(20, 30, 60, 0.6), transparent 25%),
+                      radial-gradient(circle at 85% 30%, rgba(40, 20, 50, 0.4), transparent 25%);
+    background-attachment: fixed;
+    min-height: 100vh;
+}
+
+.dashboard-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 3rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--card-border);
+}
+
+.logo-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pulse-dot {
+    width: 12px;
+    height: 12px;
+    background-color: #00e676;
+    border-radius: 50%;
+    box-shadow: 0 0 10px #00e676;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(0, 230, 118, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); }
+}
+
+h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+.badge {
+    background: linear-gradient(90deg, #ff3366, #ff7733);
+    color: white;
+    font-size: 0.7rem;
+    padding: 3px 8px;
+    border-radius: 12px;
+    vertical-align: super;
+    font-weight: 600;
+}
+
+.subtitle {
+    color: var(--text-secondary);
+    margin-top: 5px;
+    font-size: 1rem;
+    padding-left: 24px;
+}
+
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    background: var(--card-bg);
+    border-radius: 20px;
+    border: 1px solid var(--card-border);
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.status-indicator.connected { background-color: #00e676; }
+.status-indicator.disconnected { background-color: var(--color-up); }
+
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+/* Glassmorphism Card */
+.stock-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 1.5rem;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.stock-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.card-decor {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: var(--color-neutral);
+    transition: background 0.3s;
+}
+
+.stock-card.up .card-decor { background: var(--color-up); }
+.stock-card.down .card-decor { background: var(--color-down); }
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.stock-name {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.stock-code {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 3px 6px;
+    border-radius: 6px;
+}
+
+.price-container {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-top: 5px;
+}
+
+.current-price {
+    font-size: 2.2rem;
+    font-weight: 700;
+    transition: color 0.3s;
+}
+
+.change-rate {
+    font-size: 1.1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.change-rate::before {
+    content: '';
+}
+
+.stock-card.up .current-price, .stock-card.up .change-rate { color: var(--color-up); }
+.stock-card.up .change-rate::before { content: '▲'; font-size: 0.8rem; }
+
+.stock-card.down .current-price, .stock-card.down .change-rate { color: var(--color-down); }
+.stock-card.down .change-rate::before { content: '▼'; font-size: 0.8rem; }
+
+.card-footer {
+    display: flex;
+    justify-content: space-between;
+    margin-top: auto;
+    padding-top: 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.footer-item span {
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-left: 4px;
+}
+
+/* Animations Triggered via JS */
+.flash-up {
+    animation: flashUp 0.8s ease-out forwards;
+}
+
+.flash-down {
+    animation: flashDown 0.8s ease-out forwards;
+}
+
+@keyframes flashUp {
+    0% { background-color: var(--color-up-bg); box-shadow: 0 0 20px var(--color-up-bg); transform: scale(1.02); }
+    100% { background-color: var(--card-bg); box-shadow: none; transform: scale(1); }
+}
+
+@keyframes flashDown {
+    0% { background-color: var(--color-down-bg); box-shadow: 0 0 20px var(--color-down-bg); transform: scale(1.02); }
+    100% { background-color: var(--card-bg); box-shadow: none; transform: scale(1); }
+}

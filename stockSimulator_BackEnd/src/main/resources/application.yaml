@@ -3,6 +3,23 @@ spring:
     name: stockSimulator
 
   # datasource는 application과 같은 라인에 있어야 합니다.
+  security:
+    oauth2:
+      client:
+        registration:
+          kakao:
+            client-id: "016777334309c0768a382f4ef0920ffa"
+            client-authentication-method: POST
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            client-name: Kakao
+        provider:
+          kakao:
+            authorization-uri: https://kauth.kakao.com/oauth/authorize
+            token-uri: https://kauth.kakao.com/oauth/token
+            user-info-uri: https://kapi.kakao.com/v2/user/me
+            user-name-attribute: id
+
   datasource:
     url: jdbc:postgresql://localhost:5432/stock_db
     username: jouijae  # 만약 연결 에러가 나면 본인의 Mac 계정명으로 바꿔보세요.

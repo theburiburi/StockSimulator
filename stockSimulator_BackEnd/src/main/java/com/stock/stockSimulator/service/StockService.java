@@ -18,9 +18,9 @@ public class StockService {
     public void closeMarket(){
         List<Stock> stocks = stockRepository.findAll();
         for(Stock stock : stocks){
-            Long finalPrice = redisService.getStockPrice(stock.getCode());
+            Long finalPrice = redisService.getStockPrice(stock.getStockCode());
 
-            stock.setEndingPrice(finalPrice);
+            stock.setClosingPrice(finalPrice);
             stock.setCurrentPrice(finalPrice);
         }
     }

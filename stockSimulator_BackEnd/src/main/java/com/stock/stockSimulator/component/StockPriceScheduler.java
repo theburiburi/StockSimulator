@@ -20,8 +20,8 @@ public class StockPriceScheduler {
     @Scheduled(fixedRate = 1000)
     public void updatePrice(){
         stockRepository.findAll().forEach(stock -> {
-            Long currentPrice = redisService.getStockPrice(stock.getCode());
-            System.out.println(stock.getName() + " " + currentPrice);
+            Long currentPrice = redisService.getStockPrice(stock.getStockCode());
+            System.out.println(stock.getCompanyName() + " " + currentPrice);
             if(currentPrice == 0) currentPrice = stock.getOpeningPrice();
 
             double volatility = 0.001;
@@ -29,12 +29,12 @@ public class StockPriceScheduler {
 
             long nextPrice = (long) (currentPrice * (1+move));
 
-            redisService.updateStockInfo(stock.getCode(), nextPrice, stock.getOpeningPrice());
+            redisService.updateStockInfo(stock.getStockCode(), nextPrice, stock.getOpeningPrice());
             stock.setCurrentPrice(nextPrice);
             messageTemplate.convertAndSend("/topic/stock", stock);
 
             double rate = ((double)(nextPrice - stock.getOpeningPrice()) / stock.getOpeningPrice()) * 100;
-            System.out.printf("[%s] 현재가: %d (%+.2f%%)%n", stock.getName(), nextPrice, rate);
+            System.out.printf("[%s] 현재가: %d (%+.2f%%)%n", stock.getCompanyName(), nextPrice, rate);
         });
     }
 }

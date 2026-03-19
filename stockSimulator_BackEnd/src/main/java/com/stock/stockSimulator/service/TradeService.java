@@ -1,5 +1,6 @@
 package com.stock.stockSimulator.service;
 
+import com.stock.stockSimulator.component.AsyncTradeLogger;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -37,7 +38,7 @@ public class TradeService {
         // [Step 2] 체결 건별 DB 비동기 기록 및 알림
         for (String orderInfo : matchedOrders) {
             String[] parts = orderInfo.split(":"); // orderId, sellerId, qty
-            asyncTradeLogger.recordTrade(buyerId, parts[1], parts[0], stockCode, price, Long.parseLong(parts[2]));
+            asyncTradeLogger.recordTrade(Long.parseLong(buyerId), Long.parseLong(parts[1]), Long.parseLong(parts[0]), stockCode, price, Integer.parseInt(parts[2]));
         }
 
         // [Step 3] 실시간 호가 전광판 Pub/Sub 알림

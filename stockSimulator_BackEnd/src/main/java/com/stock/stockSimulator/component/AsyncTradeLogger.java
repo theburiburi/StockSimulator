@@ -1,5 +1,6 @@
 package com.stock.stockSimulator.component;
 
+import com.stock.stockSimulator.common.exception.BusinessException;
 import com.stock.stockSimulator.domain.Member;
 import com.stock.stockSimulator.domain.MemberStock;
 import com.stock.stockSimulator.domain.TradeLog;
@@ -32,24 +33,39 @@ public class AsyncTradeLogger {
     @Transactional
     public void recordTrade(Long buyerId, Long sellerId, Long orderId,
                             String stockCode, int price, int qty) {
-        RLock lock = redisson.getLock("lock:trade:"+buyerId+":"+sellerId);
+        RLock bStockLcok = redisson.getLock("lock:member:"+buyerId+":stock"+stockCode);
+        RLock sStockLcok = redisson.getLock("lock:member:"+sellerId+":stock"+stockCode);
+
+        RLock bMoneyLock = redisson.getLock("lock:member:"+buyerId+":money");
+        RLock sMoneyLock = redisson.getLock("lock:member:"+sellerId+":money");
+
+        RLock multiLock = redisson.getMultiLock(bStockLcok, sStockLcok, bMoneyLock, sMoneyLock);
+
+
+
         try {
-    if(lock.tryLock(5,2, TimeUnit.SECONDS)){
-        updateDb(buyerId, sellerId, orderId, stockCode, price, qty);
-    }
-        } catch (Exception e) {
-            e.printStackTrace();
+            if(multiLock.tryLock(5,2, TimeUnit.SECONDS)){
+                updateDb(buyerId, sellerId, orderId, stockCode, price, qty);
+            }
+        } catch (InterruptedException e) {
+            log.error("체결 기록 중 락 획득 실패: {}", orderId);
         } finally {
-            if(lock.isHeldByCurrentThread()) lock.unlock();
+            if(multiLock.isHeldByCurrentThread()) multiLock.unlock();
         }
-    }
+        }
 
     @Transactional
     public void updateDb(Long buyerId, Long sellerId, Long orderId, String stockCode, int price, int quantity){
-        Member buyer = memberRepository.findById(buyerId).orElseThrow();
+        Member buyer = memberRepository.findById(buyerId)
+                .orElseThrow(() -> new BusinessException("매수자(ID: " + buyerId + ")를 찾을 수 없습니다."));
+
+        MemberStock memberStock = memberStockRepository.findByMemberIdAndStockCode(sellerId, stockCode)
+                .orElseThrow(() -> new BusinessException("매도자의 주식 보유 정보를 찾을 수 없습니다."));
+
         buyer.decreaseBalance((long) price*quantity);
-        MemberStock memberStock = memberStockRepository.findByMemberIdAndStockCode(sellerId, stockCode).orElseThrow();
         memberStock.addQuantitiy(-quantity);
-        orderRepository.findById(orderId).ifPresent(o -> o.applyTrade(quantity));
+
+        orderRepository.findById(orderId)
+                .ifPresent(o -> o.applyTrade(quantity));
     }
 }

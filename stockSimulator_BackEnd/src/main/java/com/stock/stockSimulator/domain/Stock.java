@@ -1,5 +1,6 @@
 package com.stock.stockSimulator.domain;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -11,15 +12,24 @@ import lombok.Setter;
 
 @Entity
 @Getter
+@Setter
 @NoArgsConstructor
 public class Stock {
 
-    @Id
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "code")
     private String stockCode;
+
+    @Column(name = "name")
     private String companyName;
 
     private Long openingPrice;
+
+    @Column(name = "ending_price")
     private Long closingPrice;
+
     private Long highPrice;
     private Long lowPrice;
     private Long currentPrice;

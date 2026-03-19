@@ -3,6 +3,8 @@ package com.stock.stockSimulator.service;
 import com.stock.stockSimulator.domain.Member;
 import com.stock.stockSimulator.domain.StockOrder;
 import com.stock.stockSimulator.domain.OrderStatus;
+import com.stock.stockSimulator.domain.OrderSide;
+import com.stock.stockSimulator.domain.MemberStock;
 import com.stock.stockSimulator.repository.MemberRepository;
 import com.stock.stockSimulator.repository.MemberStockRepository;
 import com.stock.stockSimulator.repository.OrderRepository;
@@ -35,7 +37,7 @@ public class MatchTradeService {
         newOrder.setPrice(price);
         newOrder.setQuantity(qty);
         newOrder.setRemainingQuantity(qty);
-        newOrder.setStatus(OrderStatus.PENDING);
+        newOrder.setStatus(OrderStatus.WAITING);
         newOrder.setCreatedAt(LocalDateTime.now());
         orderRepository.save(newOrder);
 
@@ -63,7 +65,7 @@ public class MatchTradeService {
             updateOrderProgress(oppOrder, tradeQty);
 
             // 6. Redis 현재가 갱신 (전광판 반영)
-            redisService.updateStockPrice(newOrder.getStockCode(), tradePrice);
+            redisService.setStockPrice(newOrder.getStockCode(), tradePrice);
         }
     }
 
@@ -88,10 +90,10 @@ public class MatchTradeService {
     }
 
     private void updateStockPortfolio(Member member, String code, int qty, long price, boolean isBuy) {
-        MemberStock stock = memberStockRepository.findByMemberAndStockCode(member, code)
+        MemberStock stock = memberStockRepository.findByMemberIdAndStockCode(member.getId(), code)
                 .orElseGet(() -> {
                     MemberStock ns = new MemberStock();
-                    ns.setMember(member);
+                    ns.setMemberId(member.getId());
                     ns.setStockCode(code);
                     ns.setQuantity(0);
                     ns.setAveragePrice(0L);

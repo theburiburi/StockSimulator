@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockSimulator Live Dashboard</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- WebSockets -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.5.2/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <div class="header-content">
+                <div class="logo-container">
+                    <div class="pulse-dot"></div>
+                    <h1>StockSimulator <span class="badge">LIVE</span></h1>
+                </div>
+                <p class="subtitle">실시간 주가 감지 시스템</p>
+            </div>
+            <div class="connection-status" id="connectionStatus">
+                <span class="status-indicator disconnected"></span>
+                <span class="status-text">연결 대기중...</span>
+            </div>
+        </header>
+
+        <main>
+            <div class="grid-container" id="stockGrid">
+                <!-- Stock Cards will be appended here dynamically -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Logic -->
+    <script src="app.js"></script>
+</body>
+</html>

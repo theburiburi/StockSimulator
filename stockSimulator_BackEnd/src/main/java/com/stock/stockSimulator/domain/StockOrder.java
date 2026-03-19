@@ -2,35 +2,38 @@ package com.stock.stockSimulator.domain;
 
 import jakarta.persistence.*;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
 
 @Entity
 @Getter
+@Setter
 @NoArgsConstructor
 public class StockOrder {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    private Long memberId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "member_id")
+    private Member member;
+
     private String stockCode;
-    private int price;
-    private int quantity;
-    private int remainingQuantity;
+
+    @Enumerated(EnumType.STRING)
+    private OrderSide side;
+
+    private Long price;
+    private Integer quantity;
+    private Integer remainingQuantity;
+    private LocalDateTime createdAt;
 
     @Enumerated(EnumType.STRING)
     private OrderStatus status;
 
-    public StockOrder(Long memberId, String stockCode, int price,
-                      int quantity, int remainingQuantity, OrderStatus status){
-        this.memberId = memberId;
-        this.stockCode = stockCode;
-        this.price = price;
-        this.quantity = quantity;
-        this.remainingQuantity = remainingQuantity;
-        this.status = status;
-    }
-
     public void applyTrade(int quantity){
-        this.remainingQuantity -= quantity;
-        this.status = this.remainingQuantity <= 0 ? OrderStatus.COMPLETED : OrderStatus.PARTIAL;
+        this.remainingQuantity = Math.max(0, this.remainingQuantity - quantity);
+        this.status = this.remainingQuantity == 0 ? OrderStatus.COMPLETED : OrderStatus.PARTIAL;
     }
 }
