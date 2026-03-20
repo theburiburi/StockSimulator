@@ -31,8 +31,8 @@ public class MatchTradeService {
 
     @Transactional
     public void placeMatchOrder(Long memberId, String code, OrderType orderType, Long price, Integer qty, OrderSide side) {
-        // 1. 주문자 조회 (Pessimistic Lock으로 잔고 보호)
-        Member member = memberRepository.findByIdWithLock(memberId)
+        // 1. 주문자 조회 (데이터 정합성 기본 체크)
+        Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
 
         long totalAmount = 0L;
@@ -170,18 +170,47 @@ public class MatchTradeService {
     }
 
     private void processAssetTransfer(StockOrder newOrder, StockOrder oppOrder, int qty, long price) {
-        Member buyer = (newOrder.getSide() == OrderSide.BUY) ? newOrder.getMember() : oppOrder.getMember();
-        Member seller = (newOrder.getSide() == OrderSide.SELL) ? newOrder.getMember() : oppOrder.getMember();
+        Member m1 = newOrder.getMember();
+        Member m2 = oppOrder.getMember();
+
+        // 데드락 방지를 위한 일관된 락 획득 순서 (XOR 기반 Fairness 적용)
+        long currentSeed = System.currentTimeMillis() / 60000;
+        long p1 = m1.getId() ^ currentSeed;
+        long p2 = m2.getId() ^ currentSeed;
+
+        Member firstMember, secondMember;
+        if (p1 < p2) {
+            firstMember = m1;
+            secondMember = m2;
+        } else {
+            firstMember = m2;
+            secondMember = m1;
+        }
+
+        // 1. 멤버 락 획득 (잔고 보호)
+        Member lockedFirst = memberRepository.findByIdWithLock(firstMember.getId()).get();
+        Member lockedSecond = memberRepository.findByIdWithLock(secondMember.getId()).get();
 
         long totalAmount = (long) price * qty;
+        
+        // Locked 인스턴스에서 Buyer/Seller 다시 식별
+        Member buyer = (newOrder.getSide() == OrderSide.BUY) ? 
+                (lockedFirst.getId().equals(newOrder.getMember().getId()) ? lockedFirst : lockedSecond) :
+                (lockedFirst.getId().equals(oppOrder.getMember().getId()) ? lockedFirst : lockedSecond);
+        Member seller = (buyer.getId().equals(lockedFirst.getId())) ? lockedSecond : lockedFirst;
 
         // 잔고 이동
         buyer.setBalance(buyer.getBalance() - totalAmount);
         seller.setBalance(seller.getBalance() + totalAmount);
 
-        // 주식 및 평단가 업데이트
-        updateStockPortfolio(buyer, newOrder.getStockCode(), qty, price, true);
-        updateStockPortfolio(seller, newOrder.getStockCode(), qty, price, false);
+        // 2. 주식 포트폴리오 락 획득 및 업데이트 (동일한 XOR 순서 적용)
+        if (p1 < p2) {
+            updateStockPortfolio(m1, newOrder.getStockCode(), qty, price, newOrder.getSide() == OrderSide.BUY);
+            updateStockPortfolio(m2, newOrder.getStockCode(), qty, price, oppOrder.getSide() == OrderSide.BUY);
+        } else {
+            updateStockPortfolio(m2, newOrder.getStockCode(), qty, price, oppOrder.getSide() == OrderSide.BUY);
+            updateStockPortfolio(m1, newOrder.getStockCode(), qty, price, newOrder.getSide() == OrderSide.BUY);
+        }
     }
 
     private void updateOrderProgress(StockOrder order, int qty) {
