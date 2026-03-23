@@ -89,7 +89,7 @@ sequenceDiagram
    - 락 획득 순서를 계좌 ID 기준으로 고정하여 '순환 대기' 조건을 타파했습니다. 이는 분산 환경에서도 적용 가능한 가장 강력한 데드락 방지 전략입니다.
 3. **Redis Pub/Sub을 사용한 이유는?**
    - 단일 서버의 WebSocket만으로는 서버 대수가 늘어날 때 알림 전파가 불가능합니다. Redis를 메시지 브로커로 사용하여 Multi-node 환경에서도 모든 유저에게 실시간 알림이 도달하도록 설계했습니다.
-�블슈팅 (Troubleshooting)
+트러블슈팅 (Troubleshooting)
 
 ### 1. [Issue] 대량 주문 시 데이터베이스 데드락(Deadlock) 현상
 - **상황**: 10,000건의 동시 주문 요청 시 PostgreSQL에서 `deadlock detected` 오류 발생.
