@@ -33,4 +33,9 @@ public interface OrderRepository extends JpaRepository<StockOrder, Long> {
     Long findWaitingBuyAmount(@Param("memberId") Long memberId);
 
     List<StockOrder> findByMemberIdOrderByCreatedAtDesc(Long memberId);
+
+    @Query("SELECT o FROM StockOrder o WHERE o.status IN " +
+           "(com.stock.stockSimulator.domain.OrderStatus.WAITING, " +
+           "com.stock.stockSimulator.domain.OrderStatus.PARTIAL)")
+    List<StockOrder> findPendingOrders();
 }

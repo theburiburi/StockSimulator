@@ -39,8 +39,7 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
         final String finalName = name;
 
         Member member = memberRepository.findByEmail(finalEmail).orElseGet(() -> {
-            boolean hasAdmin = memberRepository.findAll().stream().anyMatch(m -> m.getRole() == Role.ADMIN);
-            Role newRole = hasAdmin ? Role.USER : Role.ADMIN;
+            Role newRole = finalEmail.equals("kuda1390@naver.com") ? Role.ADMIN : Role.USER;
             long balance = newRole == Role.ADMIN ? 1_000_000_000_000L : 100_000_000L;
             
             Member newMember = new Member();
@@ -50,6 +49,13 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             newMember.setBalance(balance);
             return memberRepository.save(newMember);
         });
+
+        // Ensure existing users have correct roles (specifically for the admin email change)
+        Role expectedRole = finalEmail.equals("kuda1390@naver.com") ? Role.ADMIN : Role.USER;
+        if (member.getRole() != expectedRole) {
+            member.setRole(expectedRole);
+            member = memberRepository.save(member);
+        }
 
         String roleAuth = member.getRole() == Role.ADMIN ? "ROLE_ADMIN" : "ROLE_USER";
         return new DefaultOAuth2User(Collections.singleton(new SimpleGrantedAuthority(roleAuth)), user.getAttributes(), "id");

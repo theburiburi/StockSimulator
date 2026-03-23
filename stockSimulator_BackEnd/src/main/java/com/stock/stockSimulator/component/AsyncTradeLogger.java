@@ -3,11 +3,9 @@ package com.stock.stockSimulator.component;
 import com.stock.stockSimulator.common.exception.BusinessException;
 import com.stock.stockSimulator.domain.Member;
 import com.stock.stockSimulator.domain.MemberStock;
-import com.stock.stockSimulator.domain.TradeLog;
 import com.stock.stockSimulator.repository.MemberRepository;
 import com.stock.stockSimulator.repository.MemberStockRepository;
 import com.stock.stockSimulator.repository.OrderRepository;
-import com.stock.stockSimulator.repository.TradeRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,7 +23,6 @@ public class AsyncTradeLogger {
     private final RedissonClient redisson;
     private final MemberRepository memberRepository;
     private final MemberStockRepository memberStockRepository;
-    private final TradeRepository tradeRepository;
     private final OrderRepository orderRepository;
 
 
