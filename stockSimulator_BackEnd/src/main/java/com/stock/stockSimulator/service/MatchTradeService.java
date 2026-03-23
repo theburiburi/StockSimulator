@@ -8,8 +8,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.stereotype.Service;
 
+import java.text.NumberFormat;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 주문 매칭 엔진
@@ -25,6 +27,7 @@ public class MatchTradeService {
     private final RedisService redisService;
     private final StockService stockService;
     private final SimpMessageSendingOperations messageTemplate;
+    private final NotificationService notificationService;
 
     @Transactional
     public void placeMatchOrder(Long memberId, String code, OrderType orderType, Long price, Integer qty, OrderSide side) {
@@ -162,6 +165,22 @@ public class MatchTradeService {
             // 주식 가격 갱신 + WebSocket 방송 → StockService에 위임 (SRP)
             Stock updatedStock = stockService.updateCurrentPrice(newOrder.getStockCode(), tradePrice);
             messageTemplate.convertAndSend("/topic/stock", updatedStock);
+
+            // 개인 알림 전송 (매수자 / 매도자)
+            String formattedPrice = NumberFormat.getNumberInstance(Locale.KOREA).format(tradePrice);
+            Member buyer  = (newOrder.getSide() == OrderSide.BUY)  ? newOrder.getMember()  : oppOrder.getMember();
+            Member seller = (newOrder.getSide() == OrderSide.SELL) ? newOrder.getMember()  : oppOrder.getMember();
+
+            notificationService.send(
+                    buyer.getId(),
+                    newOrder.getStockCode() + " " + tradeQty + "주 매수 체결 완료 (" + formattedPrice + "원)",
+                    NotificationType.TRADE_EXECUTED
+            );
+            notificationService.send(
+                    seller.getId(),
+                    newOrder.getStockCode() + " " + tradeQty + "주 매도 체결 완료 (" + formattedPrice + "원)",
+                    NotificationType.TRADE_EXECUTED
+            );
         }
 
         if (newOrder.getOrderType() == OrderType.MARKET && newOrder.getRemainingQuantity() > 0) {
