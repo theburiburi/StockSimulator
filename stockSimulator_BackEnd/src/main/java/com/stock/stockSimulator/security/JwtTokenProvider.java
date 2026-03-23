@@ -13,6 +13,7 @@ import java.util.Date;
 
 /**
  * JWT 토큰 생성 / 검증 / 정보 추출 컴포넌트
+ * Payload: sub(email), userId, role
  */
 @Slf4j
 @Component
@@ -31,14 +32,15 @@ public class JwtTokenProvider {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** 이메일과 역할로 JWT 토큰 생성 */
-    public String generateToken(String email, String role) {
+    /** 이메일, 역할, userId로 JWT 토큰 생성 */
+    public String generateToken(String email, String role, Long userId) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationMs);
 
         return Jwts.builder()
                 .subject(email)
                 .claim("role", role)
+                .claim("userId", userId)
                 .issuedAt(now)
                 .expiration(expiry)
                 .signWith(key)
@@ -53,6 +55,14 @@ public class JwtTokenProvider {
     /** 토큰에서 역할 추출 */
     public String getRole(String token) {
         return (String) parseClaims(token).get("role");
+    }
+
+    /** 토큰에서 userId 추출 */
+    public Long getUserId(String token) {
+        Object userId = parseClaims(token).get("userId");
+        if (userId instanceof Integer) return ((Integer) userId).longValue();
+        if (userId instanceof Long) return (Long) userId;
+        return null;
     }
 
     /** 토큰 유효성 검증 */

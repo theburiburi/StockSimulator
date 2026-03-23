@@ -24,7 +24,6 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
     private final JwtTokenProvider jwtTokenProvider;
     private final OAuthHelper oAuthHelper;
-    private final MemberRepository memberRepository;
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request,
@@ -41,11 +40,11 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         }
 
         String role = "ROLE_" + member.getRole().name();  // "ROLE_USER" or "ROLE_ADMIN"
-        String token = jwtTokenProvider.generateToken(member.getEmail(), role);
+        String token = jwtTokenProvider.generateToken(member.getEmail(), role, member.getId());
 
-        log.info("JWT issued for user: {}, role: {}", member.getEmail(), role);
+        log.info("JWT issued for user: {}, role: {}, userId: {}", member.getEmail(), role, member.getId());
 
-        // HttpOnly 쿠키에 JWT 저장 (SameSite=Lax)
+        // HttpOnly 쿠키에 JWT 저장
         Cookie cookie = new Cookie("jwt", token);
         cookie.setHttpOnly(true);
         cookie.setPath("/");
