@@ -45,3 +45,8 @@ spring:
 # 서버 포트 설정 (spring 소속이 아니므로 맨 앞으로 붙입니다)
 server:
   port: 8080
+
+# JWT 설정
+jwt:
+  secret: "StockSimulatorSecretKeyForJWTHS256AlgorithmMustBe256BitsLong!!"
+  expiration: 86400000  # 24시간 (ms)
