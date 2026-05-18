@@ -4,14 +4,11 @@ import time
 import random
 from typing import List
 
-# 💡 실행 전 설치가 필요합니다: pip install aiohttp
-# (IDE에서 빨간 줄이 보인다면 Terminal에서 위 명령어를 실행해 주세요)
-
 BASE_URL = "http://localhost:8080/api/orders"
 STOCK_CODE = "005930" 
-MEMBER_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-TOTAL_REQUESTS = 10000
-CONCURRENCY = 10000  # 동시 요청 수를 정확히 10000건으로 지정해 한 번에 쏟아붓습니다.
+MEMBER_IDS = [1, 2]
+TOTAL_REQUESTS = 500
+CONCURRENCY = 50
 
 class TestStats:
     def __init__(self):
@@ -40,7 +37,7 @@ async def place_order(session: aiohttp.ClientSession, semaphore: asyncio.Semapho
         
         start = time.time()
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
+            timeout = aiohttp.ClientTimeout(total=5)
             async with session.post(f"{BASE_URL}/trade", json=payload, timeout=timeout) as response:
                 latency = time.time() - start
                 if response.status == 200:
@@ -52,10 +49,9 @@ async def place_order(session: aiohttp.ClientSession, semaphore: asyncio.Semapho
             stats.fail += 1
 
 async def run_test():
-    print(f"🚀 Starting 10,000 Requests Async Test with Concurrency {CONCURRENCY}...")
+    print(f"🚀 Starting 500 Requests Async Test with Concurrency {CONCURRENCY}...")
     start_time = time.time()
     
-    # TCP 커넥션 제한 해제 및 세마포어 할당
     connector = aiohttp.TCPConnector(limit=CONCURRENCY, ttl_dns_cache=300)
     semaphore = asyncio.Semaphore(CONCURRENCY)
     
@@ -78,4 +74,3 @@ async def run_test():
 
 if __name__ == "__main__":
     asyncio.run(run_test())
-

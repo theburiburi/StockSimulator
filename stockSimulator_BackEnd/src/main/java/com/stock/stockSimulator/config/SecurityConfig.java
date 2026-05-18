@@ -34,6 +34,7 @@ public class SecurityConfig {
                                 "/", "/index.html", "/stock.html",
                                 "/*.css", "/*.js", "/favicon.ico",
                                 "/api/auth/**", "/api/stocks/**",
+                                "/api/orders/**",
                                 "/ws-stock/**"
                         ).permitAll()
                         .anyRequest().authenticated()

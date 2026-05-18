@@ -21,20 +21,24 @@ spring:
             user-name-attribute: id
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/stock_db
-    username: jouijae  # 만약 연결 에러가 나면 본인의 Mac 계정명으로 바꿔보세요.
+    url: jdbc:mysql://localhost:3306/stock_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: root  # 만약 연결 에러가 나면 본인의 MySQL 계정명으로 바꿔보세요.
     password: ""
-    driver-class-name: org.postgresql.Driver
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 150
+      minimum-idle: 10
+      connection-timeout: 30000
 
   # JPA 설정
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        dialect: org.hibernate.dialect.MySQLDialect
 
   # Redis 설정
   data:
@@ -45,6 +49,11 @@ spring:
 # 서버 포트 설정 (spring 소속이 아니므로 맨 앞으로 붙입니다)
 server:
   port: 8080
+  tomcat:
+    threads:
+      max: 1000
+    accept-count: 3000
+    max-connections: 15000
 
 # JWT 설정
 jwt:

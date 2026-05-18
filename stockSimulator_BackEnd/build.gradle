@@ -32,9 +32,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 
-	// 2. Database (postgresql & JPA)
+	// 2. Database (mysql & JPA)
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-	runtimeOnly 'org.postgresql:postgresql'
+	runtimeOnly 'com.mysql:mysql-connector-j'
 
 	// 3. Redis (Spring Data Redis - 기본 연동 및 Pub/Sub용)
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
