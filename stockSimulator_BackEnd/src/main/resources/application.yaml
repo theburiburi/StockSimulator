@@ -26,8 +26,8 @@ spring:
     password: "3239"
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: 15
-      minimum-idle: 10
+      maximum-pool-size: 60
+      minimum-idle: 30
       connection-timeout: 30000
 
   # JPA 설정
