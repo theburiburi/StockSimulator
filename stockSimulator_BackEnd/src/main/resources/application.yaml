@@ -23,10 +23,10 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/stock_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
     username: root  # 만약 연결 에러가 나면 본인의 MySQL 계정명으로 바꿔보세요.
-    password: ""
+    password: "3239"
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: 150
+      maximum-pool-size: 15
       minimum-idle: 10
       connection-timeout: 30000
 
@@ -45,13 +45,20 @@ spring:
     redis:
       host: localhost
       port: 6379
+      timeout: 10000ms
+      lettuce:
+        pool:
+          max-active: 150
+          max-idle: 50
+          min-idle: 10
+          max-wait: 5000ms
 
 # 서버 포트 설정 (spring 소속이 아니므로 맨 앞으로 붙입니다)
 server:
   port: 8080
   tomcat:
     threads:
-      max: 1000
+      max: 150
     accept-count: 3000
     max-connections: 15000
 

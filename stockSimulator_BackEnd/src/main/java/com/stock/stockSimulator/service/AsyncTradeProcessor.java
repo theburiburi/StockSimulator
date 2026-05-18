@@ -8,7 +8,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.text.NumberFormat;
 import java.util.List;
@@ -26,88 +28,91 @@ public class AsyncTradeProcessor {
     private final StockService stockService;
     private final SimpMessageSendingOperations messageTemplate;
     private final NotificationService notificationService;
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * 매칭된 거래 목록을 백그라운드 스레드에서 RDB에 안전하게 동기화하고 알림을 보냅니다.
      * ID 순 정렬 비관적 락으로 데드락을 원천 차단합니다.
      */
     @Async("taskExecutor")
-    @Transactional
     public void processMatchedTrades(List<String> matchedTrades) {
         if (matchedTrades == null || matchedTrades.isEmpty()) {
             return;
         }
 
         log.info("⚡ [AsyncTradeProcessor] Processing {} matched trades in the background...", matchedTrades.size());
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
 
         for (String tradeStr : matchedTrades) {
             try {
-                // 포맷: "buyOrderId:sellOrderId:buyerId:sellerId:price:tradeQty"
-                String[] parts = tradeStr.split(":");
-                Long buyOrderId = Long.parseLong(parts[0]);
-                Long sellOrderId = Long.parseLong(parts[1]);
-                Long buyerId = Long.parseLong(parts[2]);
-                Long sellerId = Long.parseLong(parts[3]);
-                Long tradePrice = Long.parseLong(parts[4]);
-                int tradeQty = Integer.parseInt(parts[5]);
+                transactionTemplate.executeWithoutResult(status -> {
+                    // 포맷: "buyOrderId:sellOrderId:buyerId:sellerId:price:tradeQty"
+                    String[] parts = tradeStr.split(":");
+                    Long buyOrderId = Long.parseLong(parts[0]);
+                    Long sellOrderId = Long.parseLong(parts[1]);
+                    Long buyerId = Long.parseLong(parts[2]);
+                    Long sellerId = Long.parseLong(parts[3]);
+                    Long tradePrice = Long.parseLong(parts[4]);
+                    int tradeQty = Integer.parseInt(parts[5]);
 
-                // 1. 데드락 방지: ID 오름차순으로 DB 비관적 락 획득
-                Long firstMemberId = buyerId < sellerId ? buyerId : sellerId;
-                Long secondMemberId = buyerId < sellerId ? sellerId : buyerId;
+                    // 1. 데드락 방지: ID 오름차순으로 DB 비관적 락 획득
+                    Long firstMemberId = buyerId < sellerId ? buyerId : sellerId;
+                    Long secondMemberId = buyerId < sellerId ? sellerId : buyerId;
 
-                Member lockedFirst = memberRepository.findByIdWithLock(firstMemberId)
-                        .orElseThrow(() -> new BusinessException("사용자를 찾을 수 없습니다."));
-                Member lockedSecond = memberRepository.findByIdWithLock(secondMemberId)
-                        .orElseThrow(() -> new BusinessException("사용자를 찾을 수 없습니다."));
+                    Member lockedFirst = memberRepository.findByIdWithLock(firstMemberId)
+                            .orElseThrow(() -> new BusinessException("사용자를 찾을 수 없습니다."));
+                    Member lockedSecond = memberRepository.findByIdWithLock(secondMemberId)
+                            .orElseThrow(() -> new BusinessException("사용자를 찾을 수 없습니다."));
 
-                Member buyer = lockedFirst.getId().equals(buyerId) ? lockedFirst : lockedSecond;
-                Member seller = buyer.getId().equals(lockedFirst.getId()) ? lockedSecond : lockedFirst;
+                    Member buyer = lockedFirst.getId().equals(buyerId) ? lockedFirst : lockedSecond;
+                    Member seller = buyer.getId().equals(lockedFirst.getId()) ? lockedSecond : lockedFirst;
 
-                // RDBMS 잔고 이체
-                long totalAmount = tradePrice * tradeQty;
-                buyer.setBalance(buyer.getBalance() - totalAmount);
-                seller.setBalance(seller.getBalance() + totalAmount);
+                    // RDBMS 잔고 이체
+                    long totalAmount = tradePrice * tradeQty;
+                    buyer.setBalance(buyer.getBalance() - totalAmount);
+                    seller.setBalance(seller.getBalance() + totalAmount);
 
-                memberRepository.save(buyer);
-                memberRepository.save(seller);
+                    memberRepository.save(buyer);
+                    memberRepository.save(seller);
 
-                // 2. 보유주식 갱신도 ID 오름차순 순서로 락 획득
-                StockOrder oppOrder = orderRepository.findById(sellOrderId)
-                        .orElseThrow(() -> new BusinessException("상대 매도 주문을 찾을 수 없습니다."));
-                
-                String stockCode = oppOrder.getStockCode();
+                    // 2. 보유주식 갱신도 ID 오름차순 순서로 락 획득
+                    StockOrder oppOrder = orderRepository.findById(sellOrderId)
+                            .orElseThrow(() -> new BusinessException("상대 매도 주문을 찾을 수 없습니다."));
+                    
+                    String stockCode = oppOrder.getStockCode();
 
-                if (buyerId < sellerId) {
-                    updateStockPortfolio(buyer, stockCode, tradeQty, tradePrice, true);
-                    updateStockPortfolio(seller, stockCode, tradeQty, tradePrice, false);
-                } else {
-                    updateStockPortfolio(seller, stockCode, tradeQty, tradePrice, false);
-                    updateStockPortfolio(buyer, stockCode, tradeQty, tradePrice, true);
-                }
+                    if (buyerId < sellerId) {
+                        updateStockPortfolio(buyer, stockCode, tradeQty, tradePrice, true);
+                        updateStockPortfolio(seller, stockCode, tradeQty, tradePrice, false);
+                    } else {
+                        updateStockPortfolio(seller, stockCode, tradeQty, tradePrice, false);
+                        updateStockPortfolio(buyer, stockCode, tradeQty, tradePrice, true);
+                    }
 
-                // 3. 매칭 상대방 주문의 데이터베이스 수량 차감 및 상태 갱신
-                updateOrderProgress(oppOrder, tradeQty);
-                orderRepository.save(oppOrder);
+                    // 3. 매칭 상대방 주문의 데이터베이스 수량 차감 및 상태 갱신
+                    updateOrderProgress(oppOrder, tradeQty);
+                    orderRepository.save(oppOrder);
 
-                // 4. Redis 현재가 갱신
-                redisService.setStockPrice(stockCode, tradePrice);
+                    // 4. Redis 현재가 갱신
+                    redisService.setStockPrice(stockCode, tradePrice);
 
-                // 5. DB 현재가 갱신 및 WebSocket 실시간 전광판 송출
-                Stock updatedStock = stockService.updateCurrentPrice(stockCode, tradePrice);
-                messageTemplate.convertAndSend("/topic/stock", updatedStock);
+                    // 5. DB 현재가 갱신 및 WebSocket 실시간 전광판 송출
+                    Stock updatedStock = stockService.updateCurrentPrice(stockCode, tradePrice);
+                    messageTemplate.convertAndSend("/topic/stock", updatedStock);
 
-                // 6. 개인 알림 전송 (매수자 / 매도자)
-                String formattedPrice = NumberFormat.getNumberInstance(Locale.KOREA).format(tradePrice);
-                notificationService.send(
-                        buyer.getId(),
-                        stockCode + " " + tradeQty + "주 매수 체결 완료 (" + formattedPrice + "원)",
-                        NotificationType.TRADE_EXECUTED
-                );
-                notificationService.send(
-                        seller.getId(),
-                        stockCode + " " + tradeQty + "주 매도 체결 완료 (" + formattedPrice + "원)",
-                        NotificationType.TRADE_EXECUTED
-                );
+                    // 6. 개인 알림 전송 (매수자 / 매도자)
+                    String formattedPrice = NumberFormat.getNumberInstance(Locale.KOREA).format(tradePrice);
+                    notificationService.send(
+                            buyer.getId(),
+                            stockCode + " " + tradeQty + "주 매수 체결 완료 (" + formattedPrice + "원)",
+                            NotificationType.TRADE_EXECUTED
+                    );
+                    notificationService.send(
+                            seller.getId(),
+                            stockCode + " " + tradeQty + "주 매도 체결 완료 (" + formattedPrice + "원)",
+                            NotificationType.TRADE_EXECUTED
+                    );
+                });
             } catch (Exception e) {
                 log.error("❌ Failed to process matched trade asynchronously: " + tradeStr, e);
             }

@@ -40,7 +40,7 @@ async def place_order(session: aiohttp.ClientSession, semaphore: asyncio.Semapho
         
         start = time.time()
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
+            timeout = aiohttp.ClientTimeout(total=120)
             async with session.post(f"{BASE_URL}/trade", json=payload, timeout=timeout) as response:
                 latency = time.time() - start
                 if response.status == 200:
