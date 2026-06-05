@@ -14,6 +14,42 @@
 - **Real-time Messaging**: Spring WebSocket (STOMP) & **Redis Pub/Sub** (Broadcasting)
 - **Build Tool**: Gradle
 
+### 🚢 분리 배포 구조
+분산 환경에서는 여러 Spring 서버가 각자 로컬 Redis를 사용하면 주문장이 서버별로 갈라져 정합성이 깨집니다. 따라서 Redis는 애플리케이션 서버와 분리된 공용 원장 서버로 배포하고, 모든 백엔드 인스턴스가 같은 Redis Primary를 바라보도록 구성합니다.
+
+```mermaid
+flowchart LR
+    App1[Backend Instance 1] --> Redis[(Shared Redis Primary)]
+    App2[Backend Instance 2] --> Redis
+    App3[Backend Instance 3] --> Redis
+    App1 --> MySQL[(MySQL)]
+    App2 --> MySQL
+    App3 --> MySQL
+    Redis --> Replica[(Redis Replica / Sentinel or Managed Failover)]
+```
+
+- `docker-compose.infra.yml`: Redis와 MySQL을 별도 인프라로 실행합니다.
+- `docker-compose.backend.yml`: 백엔드 애플리케이션만 실행합니다. Redis/MySQL 주소는 환경변수로 주입합니다.
+- Redis 주문장에는 TTL/eviction을 걸지 않고 `maxmemory-policy noeviction`으로 운영합니다. 메모리 한계에 도달하면 데이터를 조용히 삭제하는 대신 신규 주문 쓰기를 실패시키는 쪽이 안전합니다.
+- Redis Cluster는 Lua가 여러 키를 동시에 다루는 현재 구조와 궁합이 까다롭습니다. 우선은 **Redis Primary-Replica + Sentinel/Managed Failover** 구성을 권장합니다.
+
+로컬 분리 실행 예시:
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.infra.yml up -d
+docker compose -f docker-compose.backend.yml up -d --build
+```
+
+외부 Redis/MySQL을 사용할 때는 백엔드 실행 환경에 아래처럼 주소만 바꿔 주입합니다.
+
+```bash
+REDIS_HOST=your-redis-host
+REDIS_PORT=6379
+DB_HOST=your-mysql-host
+DB_PORT=3306
+```
+
 ### 📡 System Flow (High-Performance Engine)
 ```mermaid
 sequenceDiagram
@@ -35,17 +71,19 @@ sequenceDiagram
     MatchService-->>User: 200 OK ("주문 접수 완료") 즉각 응답
     
     note over Redis, DB: Redis가 실시간 체결 원장, MySQL은 확정 결과를 비동기 영속화
+    Redis->>Redis: 체결 이벤트를 trade:events Stream에 기록
     note over Processor, DB: 백그라운드 스레드에서 RDB 영속성 및 알림 처리
     Processor->>DB: [Background Tx] 원자 UPDATE/UPSERT로 잔고, 보유주식, 상대 주문 상태 반영
+    Processor->>Redis: DB 반영 성공 후 trade:events 엔트리 삭제
     Processor->>User: WebSocket 실시간 전광판 송출 & 개인 체결 알림 발송
 ```
 
 ### ✅ 현재 주문 체결 흐름 요약
 1. **주문 접수**: `TradeController`가 요청을 받고 `MatchTradeService.placeMatchOrder()`로 넘깁니다.
 2. **주문 ID 선발급**: MySQL에 `StockOrder`를 짧게 INSERT하여 주문 ID를 확보합니다. 이 단계는 체결 락을 잡지 않습니다.
-3. **Redis Lua 원자 실행**: `match_engine.lua`가 Redis 안에서 잔고/보유주식 검증, 선차감, 호가 매칭, 체결 자산 이전, 미체결 주문 큐 등록까지 한 번에 처리합니다.
+3. **Redis Lua 원자 실행**: `match_engine.lua`가 Redis 안에서 잔고/보유주식 검증, 선차감, 호가 매칭, 체결 자산 이전, 체결 이벤트 로그 기록, 미체결 주문 큐 등록까지 한 번에 처리합니다.
 4. **즉시 응답**: Lua 결과로 발주 주문의 잔량/상태만 갱신하고 HTTP 요청은 빠르게 종료합니다.
-5. **비동기 DB 반영**: `AsyncTradeProcessor`가 Lua에서 확정된 체결 목록을 받아 MySQL에 원자 `UPDATE`/`UPSERT`로 반영합니다.
+5. **비동기 DB 반영**: `AsyncTradeProcessor`가 Lua에서 확정된 체결 목록을 받아 MySQL에 원자 `UPDATE`/`UPSERT`로 반영하고, 성공한 체결 이벤트를 Redis Stream에서 삭제합니다.
 6. **실시간 알림**: DB 트랜잭션이 끝난 뒤 Redis 현재가, WebSocket 전광판, 개인 알림을 전송합니다.
 
 이 구조에서 실시간 매매 정합성의 기준은 Redis Lua입니다. MySQL은 체결 결과를 영속화하는 저장소 역할을 하며, 매칭 경로에서 낙관적 락이나 비관적 락을 사용하지 않습니다.
@@ -68,6 +106,8 @@ sequenceDiagram
 *   **가상 자산 원장 (Asset Ledger)**: `String` 구조로 관리되며, 체결 연산 직전 정합성 검증 및 즉각 차감 처리를 수행합니다.
     *   `member:<memberId>:balance`: 원화 가용 잔고
     *   `member:<memberId>:stock:<stockCode>`: 개별 주식 보유량
+*   **체결 이벤트 로그 (Trade Event Log)**: `STREAM` 구조로 Redis 체결 이후 MySQL 반영 전 장애가 발생해도 재처리할 수 있게 합니다.
+    *   `trade:events`: 체결 이벤트 로그 (Field: `trade`, Format: `"buyOrderId:sellOrderId:buyerId:sellerId:price:tradeQty"`)
 
 ---
 
@@ -146,6 +186,7 @@ flowchart TD
 ### 2. Redis Lua 확정 체결 + 비동기 Write-Behind 패턴
 - **Redis가 실시간 체결 원장**: 주문 가능 여부, 대기 주문 등록, 체결 수량 계산, 자산 이전은 모두 `match_engine.lua`에서 원자적으로 완료됩니다. Redis Lua 스크립트는 실행 중 다른 Redis 명령과 interleave되지 않으므로, 동시 주문에서도 초과 매수/초과 매도와 더블 환불을 차단합니다.
 - **MySQL은 확정 결과 영속화**: `AsyncTradeProcessor`는 Lua가 반환한 체결 결과만 받아 MySQL에 반영합니다. 이때 회원/보유주식 엔티티를 조회해서 락을 잡고 수정하지 않고, `UPDATE balance = balance + ?`, `INSERT ... ON DUPLICATE KEY UPDATE`, 주문 잔량 원자 `UPDATE`로 짧게 반영합니다.
+- **장애 복구용 체결 이벤트 로그**: Lua는 체결 순간 `trade:events` Redis Stream에 이벤트를 남깁니다. DB 반영에 성공한 이벤트만 Stream에서 삭제하므로, 서버가 중간에 죽어도 재시작 시 남아 있는 이벤트를 먼저 재처리한 뒤 MySQL 기준으로 Redis 주문장과 가용자산을 재구성할 수 있습니다.
 - **트랜잭션 전면 분리**: API 요청 스레드가 RDB 커넥션을 오랫동안 점유하여 발생하는 **HikariCP 커넥션 고갈을 방지**하기 위해, 핵심 매칭 로직은 Redis Lua에 두고 DB 반영은 비동기 write-behind로 분리했습니다.
 
 ### 3. Graceful Backpressure (자가 조율 스레드 풀 설계)

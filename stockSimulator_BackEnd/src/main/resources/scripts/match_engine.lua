@@ -18,6 +18,7 @@ local qty = tonumber(ARGV[7])
 
 local buyBookKey = "orderbook:buy:" .. stockCode
 local sellBookKey = "orderbook:sell:" .. stockCode
+local tradeEventStreamKey = "trade:events"
 
 -- Helper functions
 local function getBalanceKey(mid) return "member:" .. mid .. ":balance" end
@@ -70,8 +71,10 @@ if side == "BUY" then
             local tradePrice = bestPrice
             local tradeAmount = tradePrice * tradeQty
             
-            -- 체결 기록 저장
-            table.insert(matchedTrades, orderId .. ":" .. oppOrderId .. ":" .. memberId .. ":" .. oppSellerId .. ":" .. tradePrice .. ":" .. tradeQty)
+            -- 체결 이벤트를 Redis Stream에 먼저 기록하여 DB 반영 전 장애가 나도 재처리 가능하게 한다.
+            local tradeEvent = orderId .. ":" .. oppOrderId .. ":" .. memberId .. ":" .. oppSellerId .. ":" .. tradePrice .. ":" .. tradeQty
+            local tradeEventId = redis.call('XADD', tradeEventStreamKey, '*', 'trade', tradeEvent)
+            table.insert(matchedTrades, tradeEventId .. "|" .. tradeEvent)
             
             -- Redis 잔액/자산 실시간 이전
             redis.call('INCRBY', getBalanceKey(oppSellerId), tradeAmount)
@@ -126,8 +129,10 @@ else
             local tradePrice = bestPrice
             local tradeAmount = tradePrice * tradeQty
             
-            -- 체결 기록 저장
-            table.insert(matchedTrades, oppOrderId .. ":" .. orderId .. ":" .. oppBuyerId .. ":" .. memberId .. ":" .. tradePrice .. ":" .. tradeQty)
+            -- 체결 이벤트를 Redis Stream에 먼저 기록하여 DB 반영 전 장애가 나도 재처리 가능하게 한다.
+            local tradeEvent = oppOrderId .. ":" .. orderId .. ":" .. oppBuyerId .. ":" .. memberId .. ":" .. tradePrice .. ":" .. tradeQty
+            local tradeEventId = redis.call('XADD', tradeEventStreamKey, '*', 'trade', tradeEvent)
+            table.insert(matchedTrades, tradeEventId .. "|" .. tradeEvent)
             
             -- Redis 잔액/자산 실시간 이전
             redis.call('INCRBY', getBalanceKey(memberId), tradeAmount)

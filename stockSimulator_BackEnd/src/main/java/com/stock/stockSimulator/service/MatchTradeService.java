@@ -43,9 +43,10 @@ public class MatchTradeService {
      * 서버 시작 시 데이터베이스의 최신 상태(잔고, 보유주식, 대기주문)를 Redis로 완벽하게 이전합니다.
      */
     @EventListener(ApplicationReadyEvent.class)
-    @Transactional
     public void syncAllToRedisOnStartup() {
         log.info("🚀 [TradeEngine] Syncing all database members and pending orders to Redis...");
+
+        asyncTradeProcessor.replayPendingTradeEvents();
 
         try {
             // 기존 Redis 데이터 초기화

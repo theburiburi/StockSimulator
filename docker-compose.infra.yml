@@ -1,0 +1,43 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: stocksim-redis
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ./deploy/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - stocksim-redis-data:/data
+    networks:
+      - stocksim-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  mysql:
+    image: mysql:8.4
+    container_name: stocksim-mysql
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-stock_db}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-3239}
+    volumes:
+      - stocksim-mysql-data:/var/lib/mysql
+    networks:
+      - stocksim-net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  stocksim-net:
+    name: stocksim-net
+
+volumes:
+  stocksim-redis-data:
+  stocksim-mysql-data:

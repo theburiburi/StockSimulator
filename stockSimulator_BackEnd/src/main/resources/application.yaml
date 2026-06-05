@@ -21,9 +21,9 @@ spring:
             user-name-attribute: id
 
   datasource:
-    url: jdbc:mysql://localhost:3306/stock_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
-    username: root  # 만약 연결 에러가 나면 본인의 MySQL 계정명으로 바꿔보세요.
-    password: "3239"
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:stock_db}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:3239}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 60
@@ -43,19 +43,20 @@ spring:
   # Redis 설정
   data:
     redis:
-      host: localhost
-      port: 6379
-      timeout: 10000ms
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: ${REDIS_TIMEOUT:10000ms}
       lettuce:
         pool:
-          max-active: 150
-          max-idle: 50
-          min-idle: 10
-          max-wait: 5000ms
+          max-active: ${REDIS_POOL_MAX_ACTIVE:150}
+          max-idle: ${REDIS_POOL_MAX_IDLE:50}
+          min-idle: ${REDIS_POOL_MIN_IDLE:10}
+          max-wait: ${REDIS_POOL_MAX_WAIT:5000ms}
 
 # 서버 포트 설정 (spring 소속이 아니므로 맨 앞으로 붙입니다)
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   tomcat:
     threads:
       max: 150
@@ -64,5 +65,5 @@ server:
 
 # JWT 설정
 jwt:
-  secret: "StockSimulatorSecretKeyForJWTHS256AlgorithmMustBe256BitsLong!!"
-  expiration: 86400000  # 24시간 (ms)
+  secret: ${JWT_SECRET:StockSimulatorSecretKeyForJWTHS256AlgorithmMustBe256BitsLong!!}
+  expiration: ${JWT_EXPIRATION:86400000}  # 24시간 (ms)
