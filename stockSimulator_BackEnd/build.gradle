@@ -40,15 +40,11 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	implementation 'org.apache.commons:commons-pool2'
 
-	// 4. Redisson (분산락 전용 라이브러리)
-	// 스프링 부트 3.x 버전을 사용하신다면 3.24.3 이상의 버전을 권장합니다.
-	implementation 'org.redisson:redisson-spring-boot-starter:3.24.3'
-
-	// 5. Security & OAuth2 (소셜 로그인)
+	// 4. Security & OAuth2 (소셜 로그인)
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
 
-	// 6. JWT
+	// 5. JWT
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'

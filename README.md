@@ -10,7 +10,7 @@
 - **Database**: MySQL (JPA/Hibernate)
 - **Matching Engine**: **Redis Lua Script** (Price-Time Priority In-Memory Order Matching)
 - **Async Processing**: Spring Async (`@Async`) & **ThreadPoolTaskExecutor with CallerRunsPolicy Backpressure**
-- **Concurrency Control**: **Pessimistic Locking (SELECT ... FOR UPDATE)** & **ID-based Sequential Locking** (RDB Synchronization)
+- **Concurrency Control**: **Redis Lua Atomic Execution** (No Optimistic/Pessimistic Locking in Matching Path)
 - **Real-time Messaging**: Spring WebSocket (STOMP) & **Redis Pub/Sub** (Broadcasting)
 - **Build Tool**: Gradle
 
@@ -34,11 +34,21 @@ sequenceDiagram
     MatchService->>Processor: processMatchedTrades(matchedTrades) 비동기 위임
     MatchService-->>User: 200 OK ("주문 접수 완료") 즉각 응답
     
+    note over Redis, DB: Redis가 실시간 체결 원장, MySQL은 확정 결과를 비동기 영속화
     note over Processor, DB: 백그라운드 스레드에서 RDB 영속성 및 알림 처리
-    Processor->>DB: [Background Tx] 회원 ID 순 비관적 락 획득
-    Processor->>DB: 잔고 이체 & 보유주식 업데이트 & 상대 주문 상태 갱신
+    Processor->>DB: [Background Tx] 원자 UPDATE/UPSERT로 잔고, 보유주식, 상대 주문 상태 반영
     Processor->>User: WebSocket 실시간 전광판 송출 & 개인 체결 알림 발송
 ```
+
+### ✅ 현재 주문 체결 흐름 요약
+1. **주문 접수**: `TradeController`가 요청을 받고 `MatchTradeService.placeMatchOrder()`로 넘깁니다.
+2. **주문 ID 선발급**: MySQL에 `StockOrder`를 짧게 INSERT하여 주문 ID를 확보합니다. 이 단계는 체결 락을 잡지 않습니다.
+3. **Redis Lua 원자 실행**: `match_engine.lua`가 Redis 안에서 잔고/보유주식 검증, 선차감, 호가 매칭, 체결 자산 이전, 미체결 주문 큐 등록까지 한 번에 처리합니다.
+4. **즉시 응답**: Lua 결과로 발주 주문의 잔량/상태만 갱신하고 HTTP 요청은 빠르게 종료합니다.
+5. **비동기 DB 반영**: `AsyncTradeProcessor`가 Lua에서 확정된 체결 목록을 받아 MySQL에 원자 `UPDATE`/`UPSERT`로 반영합니다.
+6. **실시간 알림**: DB 트랜잭션이 끝난 뒤 Redis 현재가, WebSocket 전광판, 개인 알림을 전송합니다.
+
+이 구조에서 실시간 매매 정합성의 기준은 Redis Lua입니다. MySQL은 체결 결과를 영속화하는 저장소 역할을 하며, 매칭 경로에서 낙관적 락이나 비관적 락을 사용하지 않습니다.
 
 ---
 
@@ -133,9 +143,10 @@ flowchart TD
 
 ---
 
-### 2. 비동기 Write-Behind 패턴을 통한 RDB 병목 제거
-- **트랜잭션 전면 분리**: API 요청 스레드가 RDB 커넥션을 오랫동안 점유하여 발생하는 **HikariCP 커넥션 고갈을 방지**하기 위해, 핵심 주문 접수 로직에서 `@Transactional`을 완전히 제거했습니다.
-- **Async Trade Processor**: 실제 체결로직의 RDB 반영(잔고 변경, 보유주식 업데이트, 상대편 주문 수량 차감)은 **`AsyncTradeProcessor`**로 위임되어 백그라운드에서 병렬로 안전하게 수행됩니다.
+### 2. Redis Lua 확정 체결 + 비동기 Write-Behind 패턴
+- **Redis가 실시간 체결 원장**: 주문 가능 여부, 대기 주문 등록, 체결 수량 계산, 자산 이전은 모두 `match_engine.lua`에서 원자적으로 완료됩니다. Redis Lua 스크립트는 실행 중 다른 Redis 명령과 interleave되지 않으므로, 동시 주문에서도 초과 매수/초과 매도와 더블 환불을 차단합니다.
+- **MySQL은 확정 결과 영속화**: `AsyncTradeProcessor`는 Lua가 반환한 체결 결과만 받아 MySQL에 반영합니다. 이때 회원/보유주식 엔티티를 조회해서 락을 잡고 수정하지 않고, `UPDATE balance = balance + ?`, `INSERT ... ON DUPLICATE KEY UPDATE`, 주문 잔량 원자 `UPDATE`로 짧게 반영합니다.
+- **트랜잭션 전면 분리**: API 요청 스레드가 RDB 커넥션을 오랫동안 점유하여 발생하는 **HikariCP 커넥션 고갈을 방지**하기 위해, 핵심 매칭 로직은 Redis Lua에 두고 DB 반영은 비동기 write-behind로 분리했습니다.
 
 ### 3. Graceful Backpressure (자가 조율 스레드 풀 설계)
 - **스레드 풀 사양 확장**: `corePoolSize(50)`, `maxPoolSize(100)`, `queueCapacity(100,000)`로 폭발적인 주문 요청 하에서도 대기 버퍼를 충분히 확보하도록 설계했습니다.
@@ -167,15 +178,16 @@ flowchart TD
 
 *   **Run 3: 설정 최적화를 통한 유실률 0% 달성**
     *   WAS 소켓 대기열 및 HikariCP 커넥션 풀을 대량으로 확장하여 동시 10,000건의 유입 소켓 누수와 연결 거절 문제를 방어하고 클라이언트 성공률 100%를 처음으로 확보했습니다.
-    *   하지만 백그라운드 DB 동기화 처리 루프 전체가 단일 트랜잭션으로 묶여 있어, 내부적인 락 경합으로 인한 **대량의 데이터베이스 데드락(Deadlock)과 롤백 예외가 발생**하여 실제 RDB 데이터 유실이 뒤늦게 발생하는 문제를 내포하고 있었습니다.
+    *   하지만 백그라운드 DB 동기화 처리 루프 전체가 단일 트랜잭션으로 묶여 있어, 많은 체결 건이 한 번에 커밋되며 RDB 쓰기 지연과 롤백 예외가 발생할 수 있는 구조적 위험을 내포하고 있었습니다.
 
 *   **Run 4: 설정 다이어트 & 트랜잭션 격리**
     *   **자원 경합 오버헤드 해소**: 물리 스펙(4 CPU Cores, 1 HDD)에 정렬되도록 Tomcat 스레드를 150개, HikariCP를 15개로 다이어트시켜 컨텍스트 스위칭 비용과 HDD의 임의 쓰기 병목을 제어했습니다.
-    *   **TransactionTemplate 개별 트랜잭션 분할**: 기존 메소드 수준의 트랜잭션을 걷어내고 체결 건 단위로 트랜잭션을 완전 분리하여 락 점유 대상을 최소화함으로써 **데드락 발생률 0.00%를 달성**했습니다.
+    *   **TransactionTemplate 개별 트랜잭션 분할**: 기존 메소드 수준의 트랜잭션을 걷어내고 체결 건 단위로 트랜잭션을 완전 분리하여 RDB 점유 범위를 최소화했습니다.
     *   **자금 보존 법칙 완벽 검증**: 테스트 완료 후 회원들의 예수금 합계가 단 1원의 누락 없이 **정확히 10조 원으로 온전히 보존**됨으로써, 실제 상용 주식 시뮬레이터 시스템이 갖추어야 할 최고 수준의 무결성을 증명해 냈습니다.
 
 *   **Run 5: 최종 아키텍처 - 외부 I/O 격리 및 리소스 최적 정렬로 성능 극대화! 🚀**
     *   **커넥션 점유 오버헤드 해제 (Connection Pinning 해결)**: 기존 Run 4에서는 트랜잭션을 격리했으나, 트랜잭션 범위 내부의 웹소켓/알림 전송 등 느린 네트워크 I/O 작업으로 인해 커넥션이 묶이는 병목이 존재했습니다. 이를 트랜잭션 외부로 추방해 DB 점유 시간(Hold Time)을 극도로 감소시켰습니다.
+    *   **Redis Lua + 원자 SQL Write-Behind**: 실시간 체결과 자산 이전은 Redis Lua에서 끝내고, MySQL에는 확정 결과만 원자 `UPDATE`/`UPSERT`로 반영하여 매칭 경로에서 DB 락 의존성을 제거했습니다.
     *   **스레드-커넥션 정렬을 통한 고사(Starvation) 해소**: 비동기 처리를 담당하는 `taskExecutor`의 코어 스레드 수(50)를 편안하게 수용할 수 있도록 HikariCP의 `maximum-pool-size`를 60개로 증설하여 커넥션 대기 시간 경쟁을 완전 제거했습니다.
     *   **2.6배 속도 혁신 달성**: 동일 부하 조건에서 전체 체결 완주 시간을 **56.20초에서 21.46초로 단축**하고, **초당 465.99 TPS**에 육박하는 폭발적인 데이터 수용 속도 및 100% 무결성을 입증했습니다.
 
@@ -195,22 +207,22 @@ flowchart TD
 ---
 
 ## 👨‍🏫 Backend Interview Points
-1. **왜 Pessimistic Lock인가요?**
-   - 주식 거래는 데이터 정합성이 최우선입니다. 낙관적 락은 충돌 시 재시도 비용이 크고 로직이 복잡해질 수 있어, 비관적 락으로 확실한 순차 처리를 보장했습니다.
-2. **데드락을 어떻게 해결했나요?**
-   - 락 획득 순서를 계좌 ID 기준으로 고정하여 '순환 대기' 조건을 타파했습니다. 이는 분산 환경에서도 적용 가능한 가장 강력한 데드락 방지 전략입니다.
+1. **왜 DB 락이 아니라 Redis Lua인가요?**
+   - 주문 매칭은 같은 종목/가격대에 요청이 몰리기 때문에 DB row 락이나 낙관적 재시도 방식은 대기와 재시도 비용이 커집니다. Redis Lua는 스크립트 실행 중 다른 명령과 섞이지 않으므로, 잔고 검증부터 체결 자산 이전까지 하나의 원자 연산으로 처리할 수 있습니다.
+2. **MySQL 정합성은 어떻게 맞추나요?**
+   - 실시간 체결의 기준은 Redis Lua 결과입니다. MySQL은 `AsyncTradeProcessor`가 확정 체결 목록을 받아 원자 `UPDATE`/`UPSERT`로 뒤따라 반영하는 write-behind 저장소 역할을 합니다.
 3. **Redis Pub/Sub을 사용한 이유는?**
    - 단일 서버의 WebSocket만으로는 서버 대수가 늘어날 때 알림 전파가 불가능합니다. Redis를 메시지 브로커로 사용하여 Multi-node 환경에서도 모든 유저에게 실시간 알림이 도달하도록 설계했습니다.
 ## 🛠️ 트러블슈팅 (Troubleshooting)
 
-### 1. [Issue] 대량 주문 시 HikariCP 커넥션 풀 고갈 및 데드락 현상
+### 1. [Issue] 대량 주문 시 HikariCP 커넥션 풀 고갈 및 RDB 경합 현상
 - **원인 분석**: 
-  - 기존에는 주문 접수 API 실행 중 DB 비관적 락 획득 대기와 실시간 웹소켓 알림, Redis I/O가 단일 동기식 트랜잭션 안에서 수행되어 찰나의 순간에 모든 커넥션이 블로킹되었습니다.
-  - 특히 단 2명의 회원 ID(`[1, 2]`)만으로 10,000건의 교차 주문을 유도하여 회원 자산에 대한 극심한 락 경합이 직렬화를 넘어 데드락 수준으로 악화되었습니다.
+  - 기존에는 주문 접수 API 실행 중 DB 자산 조회/수정, 실시간 웹소켓 알림, Redis I/O가 단일 동기식 트랜잭션 안에서 수행되어 찰나의 순간에 모든 커넥션이 블로킹되었습니다.
+  - 특히 단 2명의 회원 ID(`[1, 2]`)만으로 10,000건의 교차 주문을 유도하면 회원 자산 row에 쓰기가 집중되어 RDBMS가 매칭 엔진의 병목이 되었습니다.
 - **해결 과정**:
-  - **비동기 체결 위임**: RDB 커넥션을 1ms 미만으로만 물고 반환하도록 트랜잭션 경계를 대폭 줄였으며, `AsyncTradeProcessor`를 통해 체결 처리를 백그라운드 스레드로 위임했습니다.
-  - **ID 오름차순 순차 정렬 락**: 여러 회원 데이터를 동시에 수정할 때 발생할 수 있는 순환 대기(Circular Wait)를 차단하기 위해, 체결 대상 회원 ID를 오름차순 정렬하여 순차적으로 비관적 락을 획득하도록 강제하여 데드락을 원천 차단했습니다.
-- **교훈**: 동시성 제어 시스템에서는 복잡한 애플리케이션 레벨의 로직보다 데이터베이스의 기본 특성을 깊이 이해하고 활용하는 것이 **'전역적인 일관성(Global Consistency)'**을 지키는 가장 확실한 기초임을 체감했습니다.
+  - **Redis Lua 체결 엔진 전환**: 잔고/보유주식 검증, 선차감, 호가 매칭, 자산 이전을 `match_engine.lua` 안에서 원자적으로 처리하도록 옮겼습니다.
+  - **비동기 DB 영속화**: API 요청 경로에서는 주문 ID와 발주 주문 상태만 짧게 저장하고, 확정 체결 결과는 `AsyncTradeProcessor`가 원자 SQL로 백그라운드 반영합니다.
+- **교훈**: 실시간 매칭의 일관성은 Redis Lua처럼 짧고 단일한 원자 실행 단위에 맡기고, RDBMS는 영속성 저장소로 분리하는 편이 고동시성 환경에서 더 단순하고 빠릅니다.
 
 ### 2. [Issue] 부하 테스트 시 TaskRejectedException 발생
 - **원인 분석**: 10,000건의 부하가 유입될 때 비동기 스레드 풀의 기본 큐(1,000)를 초과하여 작업이 반려되며 HTTP 500 에러가 발생함.
@@ -223,14 +235,14 @@ flowchart TD
   - **Tomcat 네트워크 커널 및 스레드 튜닝**: `application.yaml` 설정을 변경하여 `server.tomcat.accept-count`를 `3000`, `server.tomcat.threads.max`를 `1000`으로 튜닝하고, 최대 소켓 연결 수를 `15000`으로 확장해 유입 소켓 유실을 원천 방어했습니다.
   - **HikariCP 최적 크기 설계**: 늘어난 Tomcat 스레드가 DB 커넥션을 획득하려고 경합하는 상황을 해결하고자 `maximum-pool-size: 150` 및 `connection-timeout: 30000ms`로 조율하여 10,000건 전부 정상 도달 및 체결을 보장하게 되었습니다.
 
-### 4. [Issue] 비동기 체결 반영 중 RDBMS 데드락(Deadlock) 및 데이터 정합성 누수 현상
+### 4. [Issue] 비동기 체결 반영 중 RDBMS 경합 및 데이터 정합성 누수 현상
 - **원인 분석**:
   - **1대다(1:N) 체결 특성과 트랜잭션 범위 불일치**: 주식 매칭 엔진 특성상 한 번의 주문으로 여러 상대방의 대기 주문과 매칭되어 `List<String> matchedTrades` 형태로 다수의 체결 건이 비동기 프로세서(`AsyncTradeProcessor`)에 한 번에 인입됩니다.
   - **선언적 트랜잭션(@Transactional)의 함정**: 원래 비동기 체결 처리 메소드 레벨에 `@Transactional` 어노테이션이 달려 있었습니다. 이로 인해 개념적으로는 독립적인 여러 개의 1대1 체결 건들이 **물리적인 단 하나의 데이터베이스 트랜잭션**으로 묶여서 처리되었습니다.
-  - **락(Lock) 누적과 순환 대기(Circular Wait)**: 루프를 돌면서 모든 체결 건을 다 처리하고 메소드가 완전히 끝날 때까지 획득한 모든 회원 계좌의 비관적 락들이 해제되지 않고 계속 누적되었습니다. 이 상태에서 여러 워커 스레드가 서로 겹치는 회원들의 다른 체결 배치를 병렬로 처리하다 보니, 서로 락을 쥔 채 상대방의 락 해제를 기다리는 **멀티 로우 교착 상태(Deadlock)**가 빈번하게 발생하여 롤백 예외가 발생했습니다.
+  - **엔티티 조회-수정 방식의 쓰기 경합**: 루프를 돌며 회원과 보유주식 엔티티를 읽고 수정하는 방식은 같은 row에 쓰기가 몰릴 때 트랜잭션 대기와 롤백 가능성을 키웠습니다.
 - **해결 과정**:
-  - **트랜잭션 미세 격리 (`TransactionTemplate` 도입)**: 기존 메소드 단위의 넓은 `@Transactional` 선언을 과감히 제거하고, 루프 내부에서 **개별 체결 건(Buyer-Seller 한 쌍, 단 2명) 단위로만 `TransactionTemplate`을 사용하여 물리 트랜잭션을 적용**했습니다.
-  - **즉시 커밋 및 락 해제**: 1대1 거래가 완료되는 즉시 트랜잭션이 커밋되고 락이 반환되므로, 단일 트랜잭션이 한 번에 점유하는 계좌의 물리적 개수가 최대 `2개`로 하향 분리되어 대기 시간이 마이크로초 단위로 단축되었고 락 누적으로 인한 데드락 발생률을 0.00%로 차단했습니다.
+  - **트랜잭션 미세 격리 (`TransactionTemplate` 도입)**: 기존 메소드 단위의 넓은 `@Transactional` 선언을 제거하고, 루프 내부에서 개별 체결 건 단위로만 물리 트랜잭션을 적용했습니다.
+  - **원자 SQL 반영**: 회원 잔고는 `UPDATE balance = balance + :amount`, 매수 포지션은 `INSERT ... ON DUPLICATE KEY UPDATE`, 매도 수량과 주문 잔량은 단일 `UPDATE`로 반영해 DB 처리 시간을 줄였습니다.
 
 ### 5. [Issue] 극단적인 동시 10,000건 인입 시 Redis Lettuce 커넥션 고갈 및 소켓 예외 (`Execution failed`)
 - **원인 분석**:
@@ -249,7 +261,7 @@ flowchart TD
   - **리소스 비율의 균형화 (Resource Alignment)**: 코어 비동기 스레드 개수(50)를 지연 없이 충분히 수용하여 커넥션 고사 현상을 원천 방지하도록 [application.yaml](file:///Users/jouijae/Desktop/GitHub/StockSimulator/stockSimulator_BackEnd/src/main/resources/application.yaml)의 HikariCP 설정을 `maximum-pool-size: 60`, `minimum-idle: 30`으로 최적 정렬했습니다.
 - **개선 효과 (실제 동시 10,000건 스트레스 테스트 결과)**:
   - **10,000건의 동시 고부하 거래 체결 주문 완주 시간**: **`21,459ms` (약 21.4초, 초당 약 465 TPS)**
-  - **커넥션 획득 실패율 0%** 및 락 대기 경합 감소로 시스템 가용량 극대화, 자금 불일치 0원의 완벽한 일관성 확보!
+  - **커넥션 획득 실패율 0%** 및 DB 쓰기 경합 감소로 시스템 가용량 극대화, 자금 불일치 0원의 완벽한 일관성 확보!
 
 ### 7. [Issue] 동시성 부하 테스트 중 초과 매도(Over-selling)로 인한 RDBMS 주식 잔고 마이너스(-) 현상
 - **원인 분석**:
@@ -275,15 +287,15 @@ flowchart TD
 
 ## 👨‍🏫 Backend Interview Points / Q&A
 
-1. **왜 Pessimistic Lock과 Redis Lua를 함께 사용하나요?**
-   - 주식 거래는 잔액과 보유주식 정합성이 최우선입니다. 빠른 호가 매칭과 주문 정합성 검증은 원자적인 **Redis Lua 스크립트**로 초고속 O(1) 처리하고, 최종 영속성 반영 단계에서는 **MySQL의 비관적 락**을 통해 확실한 데이터 일관성을 지켜냅니다.
+1. **왜 Pessimistic Lock이 아니라 Redis Lua인가요?**
+   - 주식 거래는 잔액과 보유주식 정합성이 최우선입니다. 빠른 호가 매칭과 주문 정합성 검증은 원자적인 **Redis Lua 스크립트**에서 처리하고, MySQL은 Lua가 확정한 결과를 비동기로 영속화합니다. 그래서 매칭 경로에서는 낙관적/비관적 락을 사용하지 않습니다.
 2. **데드락 방지 전략은 무엇인가요?**
-   - 다중 계좌 이체 시 락 획득 순서를 **계좌 ID 오름차순**으로 고정하여 순환 대기 조건을 완벽하게 차단합니다. 분산 시스템이든 단일 DB 환경이든 완벽히 작동하는 데드락 회피 표준 방식입니다.
+   - 체결 자체는 Redis Lua 단일 실행으로 끝내 데드락 가능성을 제거합니다. DB 반영 단계도 row를 잠그고 엔티티를 수정하는 대신 짧은 원자 `UPDATE`/`UPSERT` 위주로 수행해 트랜잭션 점유 시간을 줄입니다.
 3. **비동기 설계 시 발생할 수 있는 데이터 정합성 이슈 해결 방법은?**
    - 사용자의 "가용 자산" 및 "대기 주문"은 메모리(Redis)를 신뢰성 있는 단일 소스(Single Source of Truth)로 삼아 Lua 스크립트 상에서 철저히 검증 및 동기화합니다. RDB는 비동기적으로 이를 뒤따라가며(Write-Behind) 최종 완결성을 맞추므로 사용자는 체결 여부를 지연 없이 즉각 통보받게 됩니다.
 4. **Redis Pub/Sub을 사용한 이유는?**
    - 단일 서버의 WebSocket만으로는 서버 대수가 늘어날 때 알림 전파가 불가능합니다. Redis를 메시지 브로커로 사용하여 Multi-node 환경에서도 모든 유저에게 실시간 알림이 도달하도록 설계했습니다.
 5. **시장가 주문의 잔여 수량 처리는?**
    - 시장가 주문은 "현재 가격으로 즉시 체결"이 목적이므로, 물량이 부족해 남은 양은 호가창에 남기지 않고 즉시 취소시키는 것이 일반적인 거래소의 스펙입니다. 프로젝트에도 이를 반영했습니다.
-3. **Redis의 역할은?**
+6. **Redis의 역할은?**
    - 단순한 시세 조회 성능을 높이기 위한 캐시 역할과, 스케일 아웃 환경에서 여러 서버가 동일한 시세를 공유할 수 있는 공유 메모리 역할을 수행합니다.

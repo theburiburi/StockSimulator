@@ -162,7 +162,7 @@ public class MatchTradeService {
         }
         orderRepository.save(newOrder);
 
-        // 5. 체결 완료된 거래에 대해서만 트랜잭션 락 걸고 DB 자산 이전 수행 (비동기 위임)
+        // 5. Redis Lua에서 확정된 체결 결과를 RDBMS에 비동기 반영
         asyncTradeProcessor.processMatchedTrades(matchedTrades);
     }
 

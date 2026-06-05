@@ -41,7 +41,7 @@ public class AsyncTradeProcessor {
 
     /**
      * 매칭된 거래 목록을 백그라운드 스레드에서 RDB에 안전하게 동기화하고 알림을 보냅니다.
-     * ID 순 정렬 비관적 락으로 데드락을 원천 차단합니다.
+     * 실시간 체결과 자산 이전은 Redis Lua에서 원자적으로 끝나며, RDBMS는 확정된 체결 결과를 원자 UPDATE로 따라갑니다.
      */
     @Async("taskExecutor")
     public void processMatchedTrades(List<String> matchedTrades) {
@@ -58,52 +58,23 @@ public class AsyncTradeProcessor {
                 TradeResult result = transactionTemplate.execute(status -> {
                     // 포맷: "buyOrderId:sellOrderId:buyerId:sellerId:price:tradeQty"
                     String[] parts = tradeStr.split(":");
-                    Long buyOrderId = Long.parseLong(parts[0]);
                     Long sellOrderId = Long.parseLong(parts[1]);
                     Long buyerId = Long.parseLong(parts[2]);
                     Long sellerId = Long.parseLong(parts[3]);
                     Long tradePrice = Long.parseLong(parts[4]);
                     int tradeQty = Integer.parseInt(parts[5]);
 
-                    // 1. 데드락 방지: ID 오름차순으로 DB 비관적 락 획득
-                    Long firstMemberId = buyerId < sellerId ? buyerId : sellerId;
-                    Long secondMemberId = buyerId < sellerId ? sellerId : buyerId;
-
-                    Member lockedFirst = memberRepository.findByIdWithLock(firstMemberId)
-                            .orElseThrow(() -> new BusinessException("사용자를 찾을 수 없습니다."));
-                    Member lockedSecond = memberRepository.findByIdWithLock(secondMemberId)
-                            .orElseThrow(() -> new BusinessException("사용자를 찾을 수 없습니다."));
-
-                    Member buyer = lockedFirst.getId().equals(buyerId) ? lockedFirst : lockedSecond;
-                    Member seller = buyer.getId().equals(lockedFirst.getId()) ? lockedSecond : lockedFirst;
-
-                    // RDBMS 잔고 이체
-                    long totalAmount = tradePrice * tradeQty;
-                    buyer.setBalance(buyer.getBalance() - totalAmount);
-                    seller.setBalance(seller.getBalance() + totalAmount);
-
-                    memberRepository.save(buyer);
-                    memberRepository.save(seller);
-
-                    // 2. 보유주식 갱신도 ID 오름차순 순서로 락 획득
-                    StockOrder oppOrder = orderRepository.findById(sellOrderId)
+                    StockOrder sellOrder = orderRepository.findById(sellOrderId)
                             .orElseThrow(() -> new BusinessException("상대 매도 주문을 찾을 수 없습니다."));
-                    
-                    String stockCode = oppOrder.getStockCode();
+                    String stockCode = sellOrder.getStockCode();
 
-                    if (buyerId < sellerId) {
-                        updateStockPortfolio(buyer, stockCode, tradeQty, tradePrice, true);
-                        updateStockPortfolio(seller, stockCode, tradeQty, tradePrice, false);
-                    } else {
-                        updateStockPortfolio(seller, stockCode, tradeQty, tradePrice, false);
-                        updateStockPortfolio(buyer, stockCode, tradeQty, tradePrice, true);
-                    }
+                    long totalAmount = tradePrice * tradeQty;
+                    memberRepository.addBalance(buyerId, -totalAmount);
+                    memberRepository.addBalance(sellerId, totalAmount);
+                    memberStockRepository.addBuyPosition(buyerId, stockCode, tradeQty, tradePrice);
+                    memberStockRepository.subtractQuantity(sellerId, stockCode, tradeQty);
+                    orderRepository.applyTrade(sellOrderId, tradeQty);
 
-                    // 3. 매칭 상대방 주문의 데이터베이스 수량 차감 및 상태 갱신
-                    updateOrderProgress(oppOrder, tradeQty);
-                    orderRepository.save(oppOrder);
-
-                    // 4. DB 현재가 갱신 및 정보 저장
                     Stock updatedStock = stockService.updateCurrentPrice(stockCode, tradePrice);
 
                     return new TradeResult(buyerId, sellerId, stockCode, tradePrice, tradeQty, updatedStock);
@@ -136,27 +107,4 @@ public class AsyncTradeProcessor {
         }
     }
 
-    private void updateOrderProgress(StockOrder order, int qty) {
-        order.setRemainingQuantity(order.getRemainingQuantity() - qty);
-        order.setStatus(order.getRemainingQuantity() == 0 ? OrderStatus.COMPLETED : OrderStatus.PARTIAL);
-    }
-
-    private void updateStockPortfolio(Member member, String code, int qty, long price, boolean isBuy) {
-        MemberStock stock = memberStockRepository.findByMemberIdAndStockCodeWithLock(member.getId(), code)
-                .orElseGet(() -> {
-                    MemberStock ns = new MemberStock();
-                    ns.setMemberId(member.getId());
-                    ns.setStockCode(code);
-                    ns.setQuantity(0);
-                    ns.setAveragePrice(0L);
-                    return ns;
-                });
-
-        if (isBuy) {
-            stock.updatePosition(price, qty);
-        } else {
-            stock.setQuantity(stock.getQuantity() - qty);
-        }
-        memberStockRepository.save(stock);
-    }
 }

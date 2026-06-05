@@ -3,6 +3,7 @@ package com.stock.stockSimulator.repository;
 import com.stock.stockSimulator.domain.StockOrder;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -38,4 +39,19 @@ public interface OrderRepository extends JpaRepository<StockOrder, Long> {
            "(com.stock.stockSimulator.domain.OrderStatus.WAITING, " +
            "com.stock.stockSimulator.domain.OrderStatus.PARTIAL)")
     List<StockOrder> findPendingOrders();
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE StockOrder o
+            SET o.remainingQuantity = CASE
+                    WHEN o.remainingQuantity - :quantity < 0 THEN 0
+                    ELSE o.remainingQuantity - :quantity
+                END,
+                o.status = CASE
+                    WHEN o.remainingQuantity - :quantity <= 0 THEN com.stock.stockSimulator.domain.OrderStatus.COMPLETED
+                    ELSE com.stock.stockSimulator.domain.OrderStatus.PARTIAL
+                END
+            WHERE o.id = :orderId
+            """)
+    int applyTrade(@Param("orderId") Long orderId, @Param("quantity") int quantity);
 }
